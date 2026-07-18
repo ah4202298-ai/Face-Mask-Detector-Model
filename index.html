@@ -296,7 +296,6 @@
   const statusPill = document.getElementById("status-pill");
   const logEl = document.getElementById("log");
 
-  // FIXED MAPPINGS: keys now perfectly target your bar-mask, bar-nomask, and bar-occluded HTML elements
   const CLASS_CONFIG = {
     "with Mask":      { key: "mask",     level: "INFO",  msg: "Face mask detected" },
     "without Mask":   { key: "nomask",   level: "ALERT", msg: "No face mask detected" },
@@ -311,7 +310,6 @@
     }
   }
 
-  // Live Webcam Monitoring Trigger
   startBtn.addEventListener("click", async () => {
     if (running) return;
     startBtn.disabled = true;
@@ -345,7 +343,6 @@
     window.requestAnimationFrame(loop);
   });
 
-  // Local Static File Upload Trigger
   fileSelector.addEventListener("change", async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -373,11 +370,16 @@
     reader.onload = function (e) {
       const img = new Image();
       img.onload = async function () {
+        // Enforce layout tracking parameters on image object explicitly before inference run
+        img.width = 400;
+        img.height = 300;
+
         camWrap.innerHTML = "";
         camWrap.appendChild(img);
         camPlaceholder.style.display = "none";
         statusPill.textContent = "STATIC ANALYSIS";
         
+        // Run inference safely with predefined dimension context
         const predictions = await model.predict(img);
         handlePredictions(predictions, true);
       };
