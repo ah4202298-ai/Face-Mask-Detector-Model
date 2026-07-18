@@ -99,7 +99,7 @@
     justify-content: center;
   }
 
-  #cam-wrap canvas { width: 100%; height: 100%; object-fit: cover; }
+  #cam-wrap canvas, #cam-wrap img { width: 100%; height: 100%; object-fit: cover; }
 
   #cam-wrap .placeholder {
     font-family: var(--mono);
@@ -129,9 +129,14 @@
     100% { top: 0%; }
   }
 
-  button#start-btn {
+  .controls-group {
+    display: flex;
+    gap: 12px;
     margin-top: 16px;
-    width: 100%;
+  }
+
+  button#start-btn, .upload-label {
+    flex: 1;
     background: var(--panel-alt);
     color: var(--text);
     border: 1px solid var(--border);
@@ -140,11 +145,14 @@
     padding: 12px;
     border-radius: 3px;
     cursor: pointer;
-    transition: border-color 0.15s ease;
+    text-align: center;
+    transition: all 0.15s ease;
   }
 
-  button#start-btn:hover { border-color: var(--ok); }
-  button#start-btn:disabled { opacity: 0.5; cursor: default; }
+  button#start-btn:hover, .upload-label:hover { border-color: var(--ok); background: #1c212c; }
+  button#start-btn:disabled { opacity: 0.5; cursor: default; border-color: var(--border); }
+  
+  #file-selector { display: none; }
 
   /* Confidence bars */
   #bars { margin-top: 20px; display: flex; flex-direction: column; gap: 10px; }
@@ -228,12 +236,17 @@
 
 <main>
   <section class="panel">
-    <h2>Input // Webcam</h2>
+    <h2>Input // Stream Context</h2>
     <div id="cam-wrap">
       <div id="scan-line"></div>
       <div class="placeholder" id="cam-placeholder">Camera feed will render here once started.<br/>No frames are sent anywhere — inference runs entirely in this browser tab.</div>
     </div>
-    <button id="start-btn">Start monitoring</button>
+    
+    <div class="controls-group">
+      <button id="start-btn">Start monitoring</button>
+      <label for="file-selector" class="upload-label">Upload Image</label>
+      <input type="file" id="file-selector" accept="image/*" />
+    </div>
 
     <div id="bars">
       <div class="bar-row">
@@ -261,7 +274,7 @@
 </main>
 
 <footer>
-  model source: <code>./model/</code> (exported from Teachable Machine, TensorFlow.js format) &nbsp;|&nbsp;
+  model source: <code>./</code> (exported from Teachable Machine, TensorFlow.js format) &nbsp;|&nbsp;
   built for local, offline demonstration &nbsp;|&nbsp;
   <a href="https://github.com/" target="_blank">github.com</a>
 </footer>
@@ -278,25 +291,40 @@
   let lastLogTime = 0;
 
   const startBtn = document.getElementById("start-btn");
+  const fileSelector = document.getElementById("file-selector");
   const camWrap = document.getElementById("cam-wrap");
   const camPlaceholder = document.getElementById("cam-placeholder");
   const statusPill = document.getElementById("status-pill");
   const logEl = document.getElementById("log");
 
   // Map your Teachable Machine class names to display config.
-  // Edit the keys on the left to match exactly what you named your classes in Teachable Machine.
   const CLASS_CONFIG = {
     "Mask":      { key: "mask",     level: "INFO",  msg: "Face mask detected" },
     "No Mask":   { key: "nomask",   level: "ALERT", msg: "No face mask detected" },
     "Occluded":  { key: "occluded", level: "WARN",  msg: "Face obstructed (hand/paper/object)" }
   };
 
+  // Helper function to safely ensure model is loaded once
+  async function ensureModelLoaded() {
+    if (!model) {
+      const modelURL = MODEL_URL + "model.json";
+      const metadataURL = MODEL_URL + "metadata.json";
+      model = await tmImage.load(modelURL, metadataURL);
+    }
+  }
+
+  // Live Webcam Monitoring Trigger
   startBtn.addEventListener("click", async () => {
     if (running) return;
     startBtn.disabled = true;
     startBtn.textContent = "Loading model…";
     try {
-      await init();
+      await ensureModelLoaded();
+      
+      const flip = true;
+      webcam = new tmImage.Webcam(400, 300, flip);
+      await webcam.setup();
+      await webcam.play();
     } catch (err) {
       startBtn.textContent = "Failed to start — see console";
       startBtn.disabled = false;
@@ -308,18 +336,6 @@
     statusPill.classList.add("live");
     camWrap.classList.add("active");
     camPlaceholder.style.display = "none";
-  });
-
-  async function init() {
-    const modelURL = MODEL_URL + "model.json";
-    const metadataURL = MODEL_URL + "metadata.json";
-
-    model = await tmImage.load(modelURL, metadataURL);
-
-    const flip = true;
-    webcam = new tmImage.Webcam(400, 300, flip);
-    await webcam.setup();
-    await webcam.play();
 
     camWrap.innerHTML = "";
     const scanLine = document.createElement("div");
@@ -329,7 +345,49 @@
 
     running = true;
     window.requestAnimationFrame(loop);
-  }
+  });
+
+  // Local Static File Upload Trigger
+  fileSelector.addEventListener("change", async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    statusPill.textContent = "LOADING ARTIFACT";
+    statusPill.classList.remove("live");
+
+    // Clear live webcam tracking loops if currently active
+    if (running && webcam) {
+      running = false;
+      webcam.stop();
+      camWrap.classList.remove("active");
+      startBtn.disabled = false;
+      startBtn.textContent = "Start monitoring";
+    }
+
+    try {
+      await ensureModelLoaded();
+    } catch (err) {
+      console.error(err);
+      statusPill.textContent = "ERROR";
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function (e) {
+      const img = new Image();
+      img.onload = async function () {
+        camWrap.innerHTML = "";
+        camWrap.appendChild(img);
+        camPlaceholder.style.display = "none";
+        statusPill.textContent = "STATIC ANALYSIS";
+        
+        const predictions = await model.predict(img);
+        handlePredictions(predictions, true);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
 
   async function loop() {
     if (!running) return;
@@ -340,6 +398,10 @@
 
   async function predict() {
     const predictions = await model.predict(webcam.canvas);
+    handlePredictions(predictions, false);
+  }
+
+  function handlePredictions(predictions, isStatic = false) {
     predictions.sort((a, b) => b.probability - a.probability);
     const top = predictions[0];
 
@@ -360,14 +422,17 @@
     const changed = top.className !== lastLoggedClass;
     const cooldownPassed = now - lastLogTime > 1500;
 
-    if (changed && cooldownPassed) {
-      logEvent(cfg, top.probability);
-      lastLoggedClass = top.className;
-      lastLogTime = now;
+    if (isStatic || (changed && cooldownPassed)) {
+      const displayMsg = isStatic ? `${cfg.msg} (Static Scan)` : cfg.msg;
+      logEvent(cfg, top.probability, displayMsg);
+      if (!isStatic) {
+        lastLoggedClass = top.className;
+        lastLogTime = now;
+      }
     }
   }
 
-  function logEvent(cfg, probability) {
+  function logEvent(cfg, probability, customMsg) {
     const emptyMsg = logEl.querySelector(".empty");
     if (emptyMsg) emptyMsg.remove();
 
@@ -379,12 +444,11 @@
     entry.innerHTML = `
       <span class="ts">${ts}</span>
       <span class="level ${cfg.level}">${cfg.level}</span>
-      <span class="msg">${cfg.msg}</span>
+      <span class="msg">${customMsg || cfg.msg}</span>
       <span class="conf">${pct}%</span>
     `;
     logEl.prepend(entry);
 
-    // Keep the log from growing unbounded
     const entries = logEl.querySelectorAll(".log-entry");
     if (entries.length > 200) entries[entries.length - 1].remove();
   }
