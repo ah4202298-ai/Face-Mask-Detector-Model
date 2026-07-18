@@ -310,6 +310,7 @@
     }
   }
 
+  // Live Webcam Monitoring Trigger
   startBtn.addEventListener("click", async () => {
     if (running) return;
     startBtn.disabled = true;
@@ -343,6 +344,7 @@
     window.requestAnimationFrame(loop);
   });
 
+  // Local Static File Upload Trigger
   fileSelector.addEventListener("change", async (event) => {
     const file = event.target.files[0];
     if (!file) return;
@@ -370,17 +372,25 @@
     reader.onload = function (e) {
       const img = new Image();
       img.onload = async function () {
-        // Enforce layout tracking parameters on image object explicitly before inference run
-        img.width = 400;
-        img.height = 300;
+        // Create an explicit canvas to bypass asynchronous image loading bugs in tfjs
+        const internalCanvas = document.createElement("canvas");
+        const ctx = internalCanvas.getContext("2d");
+        
+        // Setup fixed model dimensions
+        internalCanvas.width = 400;
+        internalCanvas.height = 300;
+        
+        // Paint the uploaded image directly onto the crisp canvas layout
+        ctx.drawImage(img, 0, 0, 400, 300);
 
+        // Update UI View panel container with the rendered results
         camWrap.innerHTML = "";
-        camWrap.appendChild(img);
+        camWrap.appendChild(internalCanvas);
         camPlaceholder.style.display = "none";
         statusPill.textContent = "STATIC ANALYSIS";
         
-        // Run inference safely with predefined dimension context
-        const predictions = await model.predict(img);
+        // Feed the structural canvas directly into the predictor 
+        const predictions = await model.predict(internalCanvas);
         handlePredictions(predictions, true);
       };
       img.src = e.target.result;
