@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Face-State Monitor // Detection Console</title>
+<style>
+  :root {
+    --bg: #0a0e14;
+    --panel: #12161f;
+    --panel-alt: #161b26;
+    --border: #232a37;
+    --text: #c9d1d9;
+    --text-dim: #6e7681;
+    --mono: 'JetBrains Mono', 'Courier New', monospace;
+    --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --ok: #3fb950;
+    --alert: #f85149;
+    --warn: #d29922;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    min-height: 100vh;
+  }
+
+  header {
+    border-bottom: 1px solid var(--border);
+    padding: 20px 28px;
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  header .brand {
+    font-family: var(--mono);
+    font-size: 15px;
+    letter-spacing: 0.02em;
+    color: var(--text);
+  }
+
+  header .brand span { color: var(--text-dim); }
+
+  header .status-pill {
+    font-family: var(--mono);
+    font-size: 12px;
+    color: var(--text-dim);
+    border: 1px solid var(--border);
+    border-radius: 3px;
+    padding: 4px 10px;
+  }
+
+  header .status-pill.live { color: var(--ok); border-color: rgba(63,185,80,0.35); }
+
+  main {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
+    background: var(--border);
+  }
+
+  @media (max-width: 860px) {
+    main { grid-template-columns: 1fr; }
+  }
+
+  .panel {
+    background: var(--panel);
+    padding: 24px 28px;
+  }
+
+  .panel h2 {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin: 0 0 16px 0;
+    font-weight: 500;
+  }
+
+  /* --- Camera panel --- */
+  #cam-wrap {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    background: #000;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  #cam-wrap canvas { width: 100%; height: 100%; object-fit: cover; }
+
+  #cam-wrap .placeholder {
+    font-family: var(--mono);
+    font-size: 13px;
+    color: var(--text-dim);
+    text-align: center;
+    padding: 20px;
+  }
+
+  #scan-line {
+    position: absolute;
+    left: 0; right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(63,185,80,0.9), transparent);
+    top: 0;
+    display: none;
+  }
+
+  #cam-wrap.active #scan-line {
+    display: block;
+    animation: scan 2.4s linear infinite;
+  }
+
+  @keyframes scan {
+    0% { top: 0%; }
+    50% { top: 98%; }
+    100% { top: 0%; }
+  }
+
+  button#start-btn {
+    margin-top: 16px;
+    width: 100%;
+    background: var(--panel-alt);
+    color: var(--text);
+    border: 1px solid var(--border);
+    font-family: var(--mono);
+    font-size: 13px;
+    padding: 12px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: border-color 0.15s ease;
+  }
+
+  button#start-btn:hover { border-color: var(--ok); }
+  button#start-btn:disabled { opacity: 0.5; cursor: default; }
+
+  /* Confidence bars */
+  #bars { margin-top: 20px; display: flex; flex-direction: column; gap: 10px; }
+
+  .bar-row {
+    display: grid;
+    grid-template-columns: 96px 1fr 48px;
+    align-items: center;
+    gap: 10px;
+    font-family: var(--mono);
+    font-size: 12px;
+  }
+
+  .bar-row .label { color: var(--text-dim); }
+  .bar-track {
+    height: 6px;
+    background: var(--panel-alt);
+    border-radius: 3px;
+    overflow: hidden;
+  }
+  .bar-fill { height: 100%; width: 0%; transition: width 0.15s ease; border-radius: 3px; }
+  .bar-fill.mask { background: var(--ok); }
+  .bar-fill.nomask { background: var(--alert); }
+  .bar-fill.occluded { background: var(--warn); }
+  .bar-row .pct { text-align: right; color: var(--text-dim); }
+
+  /* --- Log panel --- */
+  #log {
+    font-family: var(--mono);
+    font-size: 12px;
+    height: 420px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column-reverse;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: #0d1117;
+  }
+
+  #log .empty {
+    color: var(--text-dim);
+    padding: 16px;
+    margin: auto;
+  }
+
+  .log-entry {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--border);
+    display: grid;
+    grid-template-columns: 78px 64px 1fr 52px;
+    gap: 10px;
+    align-items: center;
+    white-space: nowrap;
+  }
+
+  .log-entry .ts { color: var(--text-dim); }
+  .log-entry .level { font-weight: 600; }
+  .log-entry .level.INFO { color: var(--ok); }
+  .log-entry .level.ALERT { color: var(--alert); }
+  .log-entry .level.WARN { color: var(--warn); }
+  .log-entry .msg { color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+  .log-entry .conf { color: var(--text-dim); text-align: right; }
+
+  footer {
+    padding: 16px 28px;
+    font-family: var(--mono);
+    font-size: 11px;
+    color: var(--text-dim);
+    border-top: 1px solid var(--border);
+  }
+
+  a { color: var(--text-dim); }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">face-state-monitor <span>// client-side inference, teachable machine model</span></div>
+  <div class="status-pill" id="status-pill">STANDBY</div>
+</header>
+
+<main>
+  <section class="panel">
+    <h2>Input // Webcam</h2>
+    <div id="cam-wrap">
+      <div id="scan-line"></div>
+      <div class="placeholder" id="cam-placeholder">Camera feed will render here once started.<br/>No frames are sent anywhere — inference runs entirely in this browser tab.</div>
+    </div>
+    <button id="start-btn">Start monitoring</button>
+
+    <div id="bars">
+      <div class="bar-row">
+        <div class="label">MASK</div>
+        <div class="bar-track"><div class="bar-fill mask" id="bar-mask"></div></div>
+        <div class="pct" id="pct-mask">0%</div>
+      </div>
+      <div class="bar-row">
+        <div class="label">NO MASK</div>
+        <div class="bar-track"><div class="bar-fill nomask" id="bar-nomask"></div></div>
+        <div class="pct" id="pct-nomask">0%</div>
+      </div>
+      <div class="bar-row">
+        <div class="label">OCCLUDED</div>
+        <div class="bar-track"><div class="bar-fill occluded" id="bar-occluded"></div></div>
+        <div class="pct" id="pct-occluded">0%</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>Detection Log</h2>
+    <div id="log"><div class="empty">Waiting for monitoring to start…</div></div>
+  </section>
+</main>
+
+<footer>
+  model source: <code>./model/</code> (exported from Teachable Machine, TensorFlow.js format) &nbsp;|&nbsp;
+  built for local, offline demonstration &nbsp;|&nbsp;
+  <a href="https://github.com/" target="_blank">github.com</a>
+</footer>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
+
+<script>
+  // Point this at the folder containing model.json / metadata.json / weights.bin
+  const MODEL_URL = "./model/";
+
+  let model, webcam, running = false;
+  let lastLoggedClass = null;
+  let lastLogTime = 0;
+
+  const startBtn = document.getElementById("start-btn");
+  const camWrap = document.getElementById("cam-wrap");
+  const camPlaceholder = document.getElementById("cam-placeholder");
+  const statusPill = document.getElementById("status-pill");
+  const logEl = document.getElementById("log");
+
+  // Map your Teachable Machine class names to display config.
+  // Edit the keys on the left to match exactly what you named your classes in Teachable Machine.
+  const CLASS_CONFIG = {
+    "Mask":      { key: "mask",     level: "INFO",  msg: "Face mask detected" },
+    "No Mask":   { key: "nomask",   level: "ALERT", msg: "No face mask detected" },
+    "Occluded":  { key: "occluded", level: "WARN",  msg: "Face obstructed (hand/paper/object)" }
+  };
+
+  startBtn.addEventListener("click", async () => {
+    if (running) return;
+    startBtn.disabled = true;
+    startBtn.textContent = "Loading model…";
+    try {
+      await init();
+    } catch (err) {
+      startBtn.textContent = "Failed to start — see console";
+      startBtn.disabled = false;
+      console.error(err);
+      return;
+    }
+    startBtn.textContent = "Monitoring…";
+    statusPill.textContent = "LIVE";
+    statusPill.classList.add("live");
+    camWrap.classList.add("active");
+    camPlaceholder.style.display = "none";
+  });
+
+  async function init() {
+    const modelURL = MODEL_URL + "model.json";
+    const metadataURL = MODEL_URL + "metadata.json";
+
+    model = await tmImage.load(modelURL, metadataURL);
+
+    const flip = true;
+    webcam = new tmImage.Webcam(400, 300, flip);
+    await webcam.setup();
+    await webcam.play();
+
+    camWrap.innerHTML = "";
+    const scanLine = document.createElement("div");
+    scanLine.id = "scan-line";
+    camWrap.appendChild(webcam.canvas);
+    camWrap.appendChild(scanLine);
+
+    running = true;
+    window.requestAnimationFrame(loop);
+  }
+
+  async function loop() {
+    if (!running) return;
+    webcam.update();
+    await predict();
+    window.requestAnimationFrame(loop);
+  }
+
+  async function predict() {
+    const predictions = await model.predict(webcam.canvas);
+    predictions.sort((a, b) => b.probability - a.probability);
+    const top = predictions[0];
+
+    predictions.forEach(p => {
+      const cfg = CLASS_CONFIG[p.className];
+      if (!cfg) return;
+      const pct = Math.round(p.probability * 100);
+      const bar = document.getElementById("bar-" + cfg.key);
+      const pctEl = document.getElementById("pct-" + cfg.key);
+      if (bar) bar.style.width = pct + "%";
+      if (pctEl) pctEl.textContent = pct + "%";
+    });
+
+    const cfg = CLASS_CONFIG[top.className];
+    if (!cfg) return;
+
+    const now = Date.now();
+    const changed = top.className !== lastLoggedClass;
+    const cooldownPassed = now - lastLogTime > 1500;
+
+    if (changed && cooldownPassed) {
+      logEvent(cfg, top.probability);
+      lastLoggedClass = top.className;
+      lastLogTime = now;
+    }
+  }
+
+  function logEvent(cfg, probability) {
+    const emptyMsg = logEl.querySelector(".empty");
+    if (emptyMsg) emptyMsg.remove();
+
+    const ts = new Date().toLocaleTimeString([], { hour12: false });
+    const pct = Math.round(probability * 100);
+
+    const entry = document.createElement("div");
+    entry.className = "log-entry";
+    entry.innerHTML = `
+      <span class="ts">${ts}</span>
+      <span class="level ${cfg.level}">${cfg.level}</span>
+      <span class="msg">${cfg.msg}</span>
+      <span class="conf">${pct}%</span>
+    `;
+    logEl.prepend(entry);
+
+    // Keep the log from growing unbounded
+    const entries = logEl.querySelectorAll(".log-entry");
+    if (entries.length > 200) entries[entries.length - 1].remove();
+  }
+</script>
+
+</body>
+</html>
