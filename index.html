@@ -149,8 +149,8 @@
     transition: all 0.15s ease;
   }
 
-  button#start-btn:hover, .upload-label:hover { border-color: var(--ok); background: #1c212c; }
-  button#start-btn:disabled { opacity: 0.5; cursor: default; border-color: var(--border); }
+  button#start-btn:hover, .upload-label:hover { border-color: var(--ok); }
+  button#start-btn:disabled { opacity: 0.5; cursor: default; }
   
   #file-selector { display: none; }
 
@@ -283,7 +283,6 @@
 <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
 
 <script>
-  // Point this at the folder containing model.json / metadata.json / weights.bin
   const MODEL_URL = "./";
 
   let model, webcam, running = false;
@@ -297,14 +296,13 @@
   const statusPill = document.getElementById("status-pill");
   const logEl = document.getElementById("log");
 
-  // Map your Teachable Machine class names to display config.
+  // FIXED MAPPINGS: keys now perfectly target your bar-mask, bar-nomask, and bar-occluded HTML elements
   const CLASS_CONFIG = {
     "with Mask":      { key: "mask",     level: "INFO",  msg: "Face mask detected" },
-    "without Mask":   { key: "without mask",   level: "ALERT", msg: "No face mask detected" },
-    "random":  { key: "random", level: "WARN",  msg: "Face obstructed (hand/paper/object)" }
+    "without Mask":   { key: "nomask",   level: "ALERT", msg: "No face mask detected" },
+    "random":         { key: "occluded", level: "WARN",  msg: "Face obstructed (hand/paper/object)" }
   };
 
-  // Helper function to safely ensure model is loaded once
   async function ensureModelLoaded() {
     if (!model) {
       const modelURL = MODEL_URL + "model.json";
@@ -355,7 +353,6 @@
     statusPill.textContent = "LOADING ARTIFACT";
     statusPill.classList.remove("live");
 
-    // Clear live webcam tracking loops if currently active
     if (running && webcam) {
       running = false;
       webcam.stop();
