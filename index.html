@@ -296,6 +296,7 @@
   const statusPill = document.getElementById("status-pill");
   const logEl = document.getElementById("log");
 
+  // Base fallback structure
   const CLASS_CONFIG = {
     "with Mask":      { key: "mask",     level: "INFO",  msg: "Face mask detected" },
     "without Mask":   { key: "nomask",   level: "ALERT", msg: "No face mask detected" },
@@ -326,6 +327,7 @@
       startBtn.textContent = "Failed to start — see console";
       startBtn.disabled = false;
       console.error(err);
+      alert("Webcam Load Error: " + err.message);
       return;
     }
     startBtn.textContent = "Monitoring…";
@@ -364,7 +366,8 @@
       await ensureModelLoaded();
     } catch (err) {
       console.error(err);
-      statusPill.textContent = "ERROR";
+      statusPill.textContent = "ERROR LOADING MODEL";
+      alert("Model failed to load from root directory: " + err.message);
       return;
     }
 
@@ -372,26 +375,30 @@
     reader.onload = function (e) {
       const img = new Image();
       img.onload = async function () {
-        // Create an explicit canvas to bypass asynchronous image loading bugs in tfjs
-        const internalCanvas = document.createElement("canvas");
-        const ctx = internalCanvas.getContext("2d");
-        
-        // Setup fixed model dimensions
-        internalCanvas.width = 400;
-        internalCanvas.height = 300;
-        
-        // Paint the uploaded image directly onto the crisp canvas layout
-        ctx.drawImage(img, 0, 0, 400, 300);
+        try {
+          const internalCanvas = document.createElement("canvas");
+          const ctx = internalCanvas.getContext("2d");
+          
+          internalCanvas.width = 400;
+          internalCanvas.height = 300;
+          ctx.drawImage(img, 0, 0, 400, 300);
 
-        // Update UI View panel container with the rendered results
-        camWrap.innerHTML = "";
-        camWrap.appendChild(internalCanvas);
-        camPlaceholder.style.display = "none";
-        statusPill.textContent = "STATIC ANALYSIS";
-        
-        // Feed the structural canvas directly into the predictor 
-        const predictions = await model.predict(internalCanvas);
-        handlePredictions(predictions, true);
+          camWrap.innerHTML = "";
+          camWrap.appendChild(internalCanvas);
+          camPlaceholder.style.display = "none";
+          statusPill.textContent = "STATIC ANALYSIS";
+          
+          // Execute prediction inside safety catch block
+          console.log("Passing canvas image data to Teachable Machine...");
+          const predictions = await model.predict(internalCanvas);
+          console.log("Raw model output predictions:", predictions);
+          
+          handlePredictions(predictions, true);
+        } catch (predictErr) {
+          console.error("Prediction Crash:", predictErr);
+          statusPill.textContent = "PREDICTION CRASHED";
+          alert("Error running inference on image: " + predictErr.message);
+        }
       };
       img.src = e.target.result;
     };
@@ -406,34 +413,55 @@
   }
 
   async function predict() {
-    const predictions = await model.predict(webcam.canvas);
-    handlePredictions(predictions, false);
+    try {
+      const predictions = await model.predict(webcam.canvas);
+      handlePredictions(predictions, false);
+    } catch (e) {
+      console.error("Webcam prediction error", e);
+    }
   }
 
   function handlePredictions(predictions, isStatic = false) {
+    if (!predictions || predictions.length === 0) return;
+
+    // Sort to find highest confidence match
     predictions.sort((a, b) => b.probability - a.probability);
     const top = predictions[0];
 
-    predictions.forEach(p => {
-      const cfg = CLASS_CONFIG[p.className];
-      if (!cfg) return;
-      const pct = Math.round(p.probability * 100);
-      const bar = document.getElementById("bar-" + cfg.key);
-      const pctEl = document.getElementById("pct-" + cfg.key);
-      if (bar) bar.style.width = pct + "%";
-      if (pctEl) pctEl.textContent = pct + "%";
+    // Dynamic Bar Assignment Loop
+    predictions.forEach((p, index) => {
+      let cfg = CLASS_CONFIG[p.className];
+      
+      // Smart Fallback: If classes still don't align, map them index-wise to keep UI running
+      if (!cfg) {
+        console.warn(`Class label mismatch: Model outputted '${p.className}'. Falling back to index assignment.`);
+        if (index === 0) cfg = { key: "mask", level: "INFO", msg: p.className };
+        if (index === 1) cfg = { key: "nomask", level: "ALERT", msg: p.className };
+        if (index === 2) cfg = { key: "occluded", level: "WARN", msg: p.className };
+      }
+
+      if (cfg) {
+        const pct = Math.round(p.probability * 100);
+        const bar = document.getElementById("bar-" + cfg.key);
+        const pctEl = document.getElementById("pct-" + cfg.key);
+        if (bar) bar.style.width = pct + "%";
+        if (pctEl) pctEl.textContent = pct + "%";
+      }
     });
 
-    const cfg = CLASS_CONFIG[top.className];
-    if (!cfg) return;
+    // Dynamic Log Parsing
+    let activeCfg = CLASS_CONFIG[top.className];
+    if (!activeCfg) {
+      activeCfg = { key: "mask", level: "INFO", msg: `Detected alternative state: ${top.className}` };
+    }
 
     const now = Date.now();
     const changed = top.className !== lastLoggedClass;
     const cooldownPassed = now - lastLogTime > 1500;
 
     if (isStatic || (changed && cooldownPassed)) {
-      const displayMsg = isStatic ? `${cfg.msg} (Static Scan)` : cfg.msg;
-      logEvent(cfg, top.probability, displayMsg);
+      const displayMsg = isStatic ? `${activeCfg.msg} (Static Scan)` : activeCfg.msg;
+      logEvent(activeCfg, top.probability, displayMsg);
       if (!isStatic) {
         lastLoggedClass = top.className;
         lastLogTime = now;
@@ -452,7 +480,7 @@
     entry.className = "log-entry";
     entry.innerHTML = `
       <span class="ts">${ts}</span>
-      <span class="level ${cfg.level}">${cfg.level}</span>
+      <span class="level ${cfg.level || 'INFO'}">${cfg.level || 'INFO'}</span>
       <span class="msg">${customMsg || cfg.msg}</span>
       <span class="conf">${pct}%</span>
     `;
